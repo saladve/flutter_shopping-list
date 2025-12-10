@@ -29,26 +29,21 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     });
   }
 
-  void _addItem(BuildContext context) async {
-    final result = await Navigator.of(context).push<String>(
+  void _addItem() async {
+    final newItem = await Navigator.of(context).push<ShoppingItem>(
       MaterialPageRoute(
         builder: (ctx) => const NewItemScreen(),
       ),
     );
 
-    if (result == null) {
-      return;
-    }
-
-    setState(() {
-      _shoppingList.add(
-        ShoppingItem(
-          name: result, // NewItemScreenから返されたアイテム名を使用
-          quantity: 1, // 新規追加アイテムのデフォルト数量
-          isCompleted: false,
-        ),
+    if (newItem != null) {
+      setState(() {
+        _shoppingList.add(newItem);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${newItem.name} をリストに追加しました。')),
       );
-    });
+    }
   }
 
   @override //UI
@@ -90,9 +85,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
       // 追加ボタン
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          _addItem(context);
-        },
+        onPressed: _addItem,
         child: const Icon(Icons.add),
       ),
     );
