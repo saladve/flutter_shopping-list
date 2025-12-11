@@ -6,6 +6,7 @@ class ShoppingItem {
   final int quantity;
   final String? location;
   final String? category;
+  final DateTime? dueDate;
   final bool isCompleted;
 
   const ShoppingItem({
@@ -14,16 +15,17 @@ class ShoppingItem {
     this.quantity = 1,
     this.location,
     this.category,
+    this.dueDate,
     this.isCompleted = false,
   });
 
-  // copyWith メソッドも忘れずに更新してください
   ShoppingItem copyWith({
     String? id,
     String? name,
     int? quantity,
     String? location,
     String? category,
+    DateTime? dueDate,
     bool? isCompleted,
   }) {
     return ShoppingItem(
@@ -32,25 +34,25 @@ class ShoppingItem {
       quantity: quantity ?? this.quantity,
       location: location ?? this.location,
       category: category ?? this.category,
+      dueDate: dueDate ?? this.dueDate,
       isCompleted: isCompleted ?? this.isCompleted,
     );
   }
 
-  factory ShoppingItem.fromFirestore(
-      Map<String, dynamic> data,
-      String id,
-      ) {
+  factory ShoppingItem.fromFirestore(Map<String, dynamic> data, String id) {
     return ShoppingItem(
       id: id,
       name: data['name'] ?? 'No Name',
       quantity: data['quantity'] ?? 1,
       location: data['location'],
       category: data['category'],
+      dueDate: data['dueDate'] is Timestamp
+          ? (data['dueDate'] as Timestamp).toDate()
+          : null,
       isCompleted: data['isCompleted'] ?? false,
     );
   }
 
-  // 💡 Firestoreに書き込むためのMap変換メソッド
   Map<String, dynamic> toFirestore() {
     return {
       'name': name,
@@ -58,7 +60,8 @@ class ShoppingItem {
       'location': location,
       'category': category,
       'isCompleted': isCompleted,
-      'createdAt': Timestamp.now(), // 作成日時を追加
+      'dueDate': dueDate != null ? Timestamp.fromDate(dueDate!) : null,
+      'createdAt': Timestamp.now(),
     };
   }
 }
