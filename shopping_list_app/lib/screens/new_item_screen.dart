@@ -36,6 +36,7 @@ class _NewItemScreenState extends State<NewItemScreen> {
       });
 
       final newItem = ShoppingItem(
+        id: '',
         name: _nameController.text,
         quantity: _enteredQuantity,
         location: _selectedLocation,
