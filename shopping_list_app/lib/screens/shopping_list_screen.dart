@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
 import '../models/shopping_item.dart';
 import '../models/purchase_record.dart';
 import '../screens/new_item_screen.dart';
@@ -93,13 +94,35 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
 
     try {
-      await _shoppingListRef.add(newItem.toFirestore());
+      print('📝 Firestore に書き込み開始: ${newItem.name}');
+      print('🔗 Firestore インスタンス: $_shoppingListRef');
+
+      // Firestore に接続確認
+      final testDoc = await FirebaseFirestore.instance
+          .collection('_test')
+          .doc('connection_test')
+          .get()
+          .timeout(const Duration(seconds: 5));
+      print('✅ Firestore 接続確認成功');
+
+      // 実際のデータ追加
+      await _shoppingListRef
+          .add(newItem.toFirestore())
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              throw TimeoutException('Firestore の書き込みがタイムアウトしました');
+            },
+          );
+      print('✅ Firestore に書き込み成功: ${newItem.name}');
 
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('${newItem.name} をリストに追加しました。')));
     } catch (e) {
+      print('❌ Firestore 書き込みエラー: $e');
+      print('❌ エラー詳細: ${e.toString()}');
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
