@@ -56,22 +56,23 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   List<ShoppingItem> _applyFiltersAndSort(List<ShoppingItem> items) {
     // フィルター
     final filtered = items.where((item) {
-      if (_categoryFilter != 'すべて' && (item.category ?? '') != _categoryFilter) {
+      if (_categoryFilter != 'すべて' &&
+          (item.category ?? '') != _categoryFilter) {
         return false;
       }
-      if (_locationFilter != 'すべて' && (item.location ?? '') != _locationFilter) {
+      if (_locationFilter != 'すべて' &&
+          (item.location ?? '') != _locationFilter) {
         return false;
       }
-      if (_locationSearch.isNotEmpty && !(item.location ?? '').contains(_locationSearch)) {
+      if (_locationSearch.isNotEmpty &&
+          !(item.location ?? '').contains(_locationSearch)) {
         return false;
       }
       return true;
     }).toList();
 
-    // ソート（期日でソートする場合のみここで処理）
     if (_sortKey == SortKey.due) {
       filtered.sort((a, b) {
-        // null を末尾に置く（降順なら先頭か末尾かを下で調整）
         final aNull = a.dueDate == null;
         final bNull = b.dueDate == null;
         if (aNull && bNull) return 0;
@@ -80,14 +81,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
         return a.dueDate!.compareTo(b.dueDate!);
       });
 
-      // 期日の降順を要求している場合は反転
       if (_isDescending) {
         return filtered.reversed.toList();
       }
     }
 
-    // 追加順（作成日時）については Stream 側で作成日時降順に取得しているため、
-    // ここではそのまま返し、必要なら呼び出し側で反転する。
     return filtered;
   }
 
@@ -100,7 +98,9 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       ),
       body: StreamBuilder<QuerySnapshot>(
         // デフォルトは作成日時降順で取得
-        stream: _shoppingListRef.orderBy('createdAt', descending: true).snapshots(),
+        stream: _shoppingListRef
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('データの読み込みエラー: ${snapshot.error}'));
@@ -117,21 +117,19 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             );
           }).toList();
 
-          // フィルタ用の選択肢を動的に生成
           final categories = <String>{'すべて'};
           final locations = <String>{'すべて'};
           for (final it in loadedItems) {
-            if (it.category != null && it.category!.isNotEmpty) categories.add(it.category!);
-            if (it.location != null && it.location!.isNotEmpty) locations.add(it.location!);
+            if (it.category != null && it.category!.isNotEmpty)
+              categories.add(it.category!);
+            if (it.location != null && it.location!.isNotEmpty)
+              locations.add(it.location!);
           }
           final categoryOptions = categories.toList()..sort();
           final locationOptions = locations.toList()..sort();
 
-          // フィルター・ソート適用
           var displayItems = _applyFiltersAndSort(loadedItems);
 
-          // 追加順（作成日時）で並べ替える場合：Stream 側は降順なので、降順を要求していればそのまま、
-          // 昇順を要求していれば反転する
           if (_sortKey == SortKey.created && !_isDescending) {
             displayItems = displayItems.reversed.toList();
           }
@@ -222,7 +220,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                                     Padding(
                                       padding: const EdgeInsets.only(top: 4),
                                       child: Text(
-                                        '場所: ${item.location}',
+                                        '購入場所: ${item.location}',
                                         style: const TextStyle(
                                           fontSize: 12,
                                           color: Colors.grey,
@@ -250,7 +248,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     );
   }
 
-  Widget _buildFilterBar(List<String> categoryOptions, List<String> locationOptions) {
+  // アプリ上部のフィルター等
+  Widget _buildFilterBar(
+    List<String> categoryOptions,
+    List<String> locationOptions,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Column(
@@ -293,11 +295,10 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              // 場所検索（部分一致）
               Expanded(
                 child: TextField(
                   decoration: const InputDecoration(
-                    labelText: '場所で検索（部分一致）',
+                    labelText: '購入場所で検索',
                     prefixIcon: Icon(Icons.search),
                   ),
                   controller: TextEditingController(text: _locationSearch),
@@ -309,7 +310,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              // 並べ替え（キー選択）
               DropdownButton<SortKey>(
                 value: _sortKey,
                 items: const [
@@ -325,8 +325,10 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               const SizedBox(width: 8),
               // 順序反転ボタン
               IconButton(
-                tooltip: _isDescending ? '降順に表示（クリックで昇順へ）' : '昇順に表示（クリックで降順へ）',
-                icon: Icon(_isDescending ? Icons.arrow_downward : Icons.arrow_upward),
+                tooltip: _isDescending ? '降順に表示' : '昇順に表示',
+                icon: Icon(
+                  _isDescending ? Icons.arrow_downward : Icons.arrow_upward,
+                ),
                 onPressed: () {
                   setState(() {
                     _isDescending = !_isDescending;
