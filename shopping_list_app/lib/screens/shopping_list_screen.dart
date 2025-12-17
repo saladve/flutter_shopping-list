@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/shopping_item.dart';
+import '../models/purchase_record.dart';
 import '../screens/new_item_screen.dart';
+import '../screens/new_purchase_record_screen.dart';
 
 enum SortKey { created, due }
 
@@ -23,7 +25,59 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   bool _isDescending = true;
   String _locationSearch = '';
 
-  void _toggleCompletion(String itemId, bool isCurrentlyCompleted) async {
+  void _toggleCompletion(
+    String itemId,
+    bool isCurrentlyCompleted,
+    ShoppingItem item,
+  ) async {
+    if (!isCurrentlyCompleted) {
+      // チェックを入れる際に確認ダイアログを表示
+      final shouldAddToPurchaseHistory = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('購買記録に追加'),
+          content: Text('${item.name} を購買記録に追加しますか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('追加しない'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('追加する'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldAddToPurchaseHistory == true) {
+        // 購買記録追加画面を開く（初期値として商品名を設定）
+        final newRecord = await Navigator.of(context).push<PurchaseRecord>(
+          MaterialPageRoute(
+            builder: (ctx) => NewPurchaseRecordScreen(initialName: item.name),
+          ),
+        );
+
+        if (newRecord != null) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('purchase_records')
+                .add(newRecord.toFirestore());
+
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('${newRecord.name} を購買記録に追加しました。')),
+            );
+          } catch (e) {
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('購買記録の追加に失敗しました: $e')));
+          }
+        }
+      }
+    }
+
     await _shoppingListRef.doc(itemId).update({
       'isCompleted': !isCurrentlyCompleted,
     });
@@ -97,7 +151,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
         backgroundColor: Theme.of(context).primaryColor,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // デフォルトは作成日時降順で取得
         stream: _shoppingListRef
             .orderBy('createdAt', descending: true)
             .snapshots(),
@@ -166,7 +219,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                             Checkbox(
                               value: item.isCompleted,
                               onChanged: (bool? newValue) {
-                                _toggleCompletion(item.id, item.isCompleted);
+                                _toggleCompletion(
+                                  item.id,
+                                  item.isCompleted,
+                                  item,
+                                );
                               },
                             ),
                             const SizedBox(width: 8),
