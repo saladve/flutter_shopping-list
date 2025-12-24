@@ -11,60 +11,32 @@ class PurchaseHistoryScreen extends StatefulWidget {
 }
 
 class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
-  CollectionReference get _purchaseRecordsRef {
-    return FirebaseFirestore.instance.collection('purchase_records');
-  }
-
+  final CollectionReference _purchaseRecordsRef = FirebaseFirestore.instance
+      .collection('purchase_records');
   String _locationFilter = 'すべて';
 
-  void _addPurchaseRecord(BuildContext context, [String? initialName]) async {
-    final newRecord = await Navigator.of(context).push<PurchaseRecord>(
-      MaterialPageRoute(
-        builder: (ctx) => NewPurchaseRecordScreen(initialName: initialName),
+  Future<void> _deleteRecord(String id) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('削除の確認'),
+        content: const Text('この記録を削除してもよろしいですか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('削除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
 
-    if (newRecord == null) {
-      return;
+    if (confirm == true) {
+      await _purchaseRecordsRef.doc(id).delete();
     }
-
-    try {
-      await _purchaseRecordsRef.add(newRecord.toFirestore());
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${newRecord.name} を購買記録に追加しました。')),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('購買記録の追加に失敗しました: $e')));
-    }
-  }
-
-  void _deletePurchaseRecord(String recordId) async {
-    try {
-      await _purchaseRecordsRef.doc(recordId).delete();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('購買記録を削除しました。')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('削除に失敗しました: $e')));
-    }
-  }
-
-  List<PurchaseRecord> _applyFilters(List<PurchaseRecord> records) {
-    if (_locationFilter == 'すべて') {
-      return records;
-    }
-    return records
-        .where((record) => record.location == _locationFilter)
-        .toList();
   }
 
   @override
@@ -75,26 +47,17 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
           '購買記録',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.surface
-            : Theme.of(context).primaryColor,
-        foregroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.onSurface
-            : Theme.of(context).colorScheme.onPrimary,
-        elevation: 2,
+        elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _purchaseRecordsRef
             .orderBy('purchaseDate', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting)
             return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            return Center(child: Text('エラーが発生しました: ${snapshot.error}'));
-          }
+          if (snapshot.hasError)
+            return Center(child: Text('エラー: ${snapshot.error}'));
 
           final records = snapshot.data!.docs
               .map(
@@ -105,94 +68,22 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
               )
               .toList();
 
-          // 購入場所のリストを取得
           final locations = {'すべて', ...records.map((r) => r.location)};
-
-          final filteredRecords = _applyFilters(records);
+          final filtered = _locationFilter == 'すべて'
+              ? records
+              : records.where((r) => r.location == _locationFilter).toList();
 
           return Column(
             children: [
-              // フィルター
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    const Text('購入場所: '),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: DropdownButton<String>(
-                          value: _locationFilter,
-                          isExpanded: true,
-                          items: locations
-                              .map(
-                                (location) => DropdownMenuItem(
-                                  value: location,
-                                  child: Text(location),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() {
-                                _locationFilter = value;
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // 購買記録リスト
+              _buildFilterBar(locations.toList()..sort()),
               Expanded(
-                child: filteredRecords.isEmpty
-                    ? const Center(child: Text('購買記録がありません'))
+                child: filtered.isEmpty
+                    ? const Center(child: Text('記録がありません'))
                     : ListView.builder(
-                        itemCount: filteredRecords.length,
-                        itemBuilder: (context, index) {
-                          final record = filteredRecords[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: ListTile(
-                              title: Text(record.name),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '¥${record.price.toStringAsFixed(0)} × ${record.quantity}個 = ¥${(record.price * record.quantity).toStringAsFixed(0)}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  Text(
-                                    '場所: ${record.location}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  Text(
-                                    '日時: ${record.purchaseDate.year}/${record.purchaseDate.month}/${record.purchaseDate.day} ${record.purchaseDate.hour.toString().padLeft(2, '0')}:${record.purchaseDate.minute.toString().padLeft(2, '0')}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  if (record.notes != null &&
-                                      record.notes!.isNotEmpty)
-                                    Text(
-                                      '備考: ${record.notes}',
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                ],
-                              ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete),
-                                onPressed: () =>
-                                    _deletePurchaseRecord(record.id),
-                              ),
-                              isThreeLine: true,
-                            ),
-                          );
-                        },
+                        padding: const EdgeInsets.all(12),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) =>
+                            _buildHistoryCard(filtered[index]),
                       ),
               ),
             ],
@@ -200,9 +91,158 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _addPurchaseRecord(context),
-        backgroundColor: Theme.of(context).primaryColor,
-        child: const Icon(Icons.add),
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const NewPurchaseRecordScreen()),
+        ),
+        child: const Icon(Icons.add_shopping_cart),
+      ),
+    );
+  }
+
+  Widget _buildFilterBar(List<String> locations) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2))),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.filter_list, size: 20, color: Colors.grey),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildSmallDropdown(
+              '場所で絞り込む',
+              _locationFilter,
+              locations,
+              (v) => setState(() => _locationFilter = v!),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(8),
+            icon: const Icon(Icons.restart_alt, size: 22, color: Colors.grey),
+            onPressed: () => setState(() => _locationFilter = 'すべて'),
+            tooltip: 'リセット',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSmallDropdown(
+    String label,
+    String value,
+    List<String> options,
+    ValueChanged<String?> onChanged,
+  ) {
+    return SizedBox(
+      height: 40, // 高さを抑えてコンパクトに
+      child: DropdownButtonFormField<String>(
+        value: value,
+        items: options
+            .map(
+              (e) => DropdownMenuItem(
+                value: e,
+                child: Text(e, style: const TextStyle(fontSize: 13)),
+              ),
+            )
+            .toList(),
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 12),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 0,
+          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          filled: true,
+          fillColor: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        ),
+      ),
+    );
+  }
+
+  // リストのカード表示
+  Widget _buildHistoryCard(PurchaseRecord record) {
+    final totalPrice = record.price * record.quantity;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    record.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '¥${record.price.toStringAsFixed(0)} × ${record.quantity} = ¥${totalPrice.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      color: Theme.of(context).primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.place, size: 14, color: Colors.grey),
+                      Text(
+                        ' ${record.location} ',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: Colors.grey,
+                      ),
+                      Text(
+                        ' ${record.purchaseDate.year}/${record.purchaseDate.month}/${record.purchaseDate.day}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (record.notes?.isNotEmpty ?? false)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '備考: ${record.notes}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              onPressed: () => _deleteRecord(record.id),
+            ),
+          ],
+        ),
       ),
     );
   }
