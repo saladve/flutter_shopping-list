@@ -15,154 +15,163 @@ class ShoppingListScreen extends StatefulWidget {
 }
 
 class _ShoppingListScreenState extends State<ShoppingListScreen> {
-  CollectionReference get _shoppingListRef {
-    return FirebaseFirestore.instance.collection('shopping_list');
-  }
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String _categoryFilter = 'すべて';
   String _locationFilter = 'すべて';
   SortKey _sortKey = SortKey.created;
   bool _isDescending = true;
 
-  void _toggleCompletion(
-    String itemId,
-    bool isCurrentlyCompleted,
-    ShoppingItem item,
-  ) async {
-    if (!isCurrentlyCompleted) {
-      // チェックを入れる際に確認ダイアログを表示
-      final shouldAddToPurchaseHistory = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('購買記録に追加'),
-          content: Text('${item.name} を購買記録に追加しますか？'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('追加しない'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('追加する'),
-            ),
-          ],
-        ),
-      );
+  CollectionReference get _shoppingListRef =>
+      _firestore.collection('shopping_list');
 
-      if (shouldAddToPurchaseHistory == true) {
-        // 購買記録追加画面を開く（初期値として商品名とカテゴリを設定）
-        final newRecord = await Navigator.of(context).push<PurchaseRecord>(
-          MaterialPageRoute(
-            builder: (ctx) => NewPurchaseRecordScreen(
-              initialName: item.name,
-              initialCategory: item.category,
-            ),
+  // --- Logic Methods ---
+
+  Future<void> _deleteItem(String itemId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('削除の確認'),
+        content: const Text('このアイテムを削除してもよろしいですか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
           ),
-        );
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('削除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
 
-        if (newRecord != null) {
-          try {
-            await FirebaseFirestore.instance
-                .collection('purchase_records')
-                .add(newRecord.toFirestore());
+    if (confirm == true) {
+      try {
+        await _shoppingListRef.doc(itemId).delete();
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('アイテムを削除しました')));
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('削除に失敗しました: $e')));
+      }
+    }
+  }
 
-            // 購買記録に追加されたアイテムをリストから削除
-            await _shoppingListRef.doc(itemId).delete();
-
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${newRecord.name} を購買記録に追加し、リストから削除しました。'),
-              ),
-            );
-            return; // 削除したのでチェック状態の更新は不要
-          } catch (e) {
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('購買記録の追加に失敗しました: $e')));
-          }
-        }
+  Future<void> _toggleCompletion(String itemId, ShoppingItem item) async {
+    if (!item.isCompleted) {
+      final shouldAdd = await _showConfirmDialog(item.name);
+      if (shouldAdd == true) {
+        await _handleMoveToHistory(itemId, item);
+        return;
       }
     }
 
-    // 購買記録に追加されなかった場合のみチェック状態を更新
     await _shoppingListRef.doc(itemId).update({
-      'isCompleted': !isCurrentlyCompleted,
+      'isCompleted': !item.isCompleted,
     });
   }
 
-  void _addItem(BuildContext context) async {
-    final newItem = await Navigator.of(context).push<ShoppingItem>(
-      MaterialPageRoute(builder: (ctx) => const NewItemScreen()),
+  Future<bool?> _showConfirmDialog(String itemName) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('購買記録に追加'),
+        content: Text('$itemName を購買記録に追加しますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('追加しない'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('追加する'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleMoveToHistory(String itemId, ShoppingItem item) async {
+    final newRecord = await Navigator.of(context).push<PurchaseRecord>(
+      MaterialPageRoute(
+        builder: (ctx) => NewPurchaseRecordScreen(
+          initialName: item.name,
+          initialCategory: item.category,
+        ),
+      ),
     );
 
-    if (newItem == null) {
-      return;
-    }
+    if (newRecord == null) return;
 
     try {
-      await _shoppingListRef.add(newItem.toFirestore());
+      final batch = _firestore.batch();
+      batch.set(
+        _firestore.collection('purchase_records').doc(),
+        newRecord.toFirestore(),
+      );
+      batch.delete(_shoppingListRef.doc(itemId));
+      await batch.commit();
 
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('${newItem.name} をリストに追加しました。')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${newRecord.name} を記録し、リストから削除しました')),
+      );
     } catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('アイテムの追加に失敗しました: $e')));
+      ).showSnackBar(SnackBar(content: Text('エラーが発生しました: $e')));
     }
   }
 
-  List<ShoppingItem> _applyFiltersAndSort(List<ShoppingItem> items) {
-    // フィルター
-    final filtered = items.where((item) {
-      if (_categoryFilter != 'すべて' &&
-          (item.category ?? '') != _categoryFilter) {
-        return false;
-      }
-      if (_locationFilter != 'すべて' &&
-          (item.location ?? '') != _locationFilter) {
-        return false;
-      }
-      return true;
+  void _addItem() async {
+    final newItem = await Navigator.of(context).push<ShoppingItem>(
+      MaterialPageRoute(builder: (ctx) => const NewItemScreen()),
+    );
+    if (newItem == null) return;
+
+    await _shoppingListRef.add(newItem.toFirestore());
+  }
+
+  List<ShoppingItem> _getFilteredItems(List<ShoppingItem> items) {
+    var filtered = items.where((item) {
+      final matchCat =
+          _categoryFilter == 'すべて' || item.category == _categoryFilter;
+      final matchLoc =
+          _locationFilter == 'すべて' || item.location == _locationFilter;
+      return matchCat && matchLoc;
     }).toList();
 
     if (_sortKey == SortKey.due) {
       filtered.sort((a, b) {
-        final aNull = a.dueDate == null;
-        final bNull = b.dueDate == null;
-        if (aNull && bNull) return 0;
-        if (aNull) return 1;
-        if (bNull) return -1;
+        if (a.dueDate == null && b.dueDate == null) return 0;
+        if (a.dueDate == null) return 1;
+        if (b.dueDate == null) return -1;
         return a.dueDate!.compareTo(b.dueDate!);
       });
-
-      if (_isDescending) {
-        return filtered.reversed.toList();
-      }
+      return _isDescending ? filtered.reversed.toList() : filtered;
     }
 
-    return filtered;
+    // Default: CreatedAt sort (StreamBuilder already orders by createdAt descending)
+    return _isDescending ? filtered : filtered.reversed.toList();
   }
+
+  // --- UI Components ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          '買い物メモアプリ',
+          '買い物リスト',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.surface
-            : Theme.of(context).primaryColor,
-        foregroundColor: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.onSurface
-            : Theme.of(context).colorScheme.onPrimary,
-        elevation: 2,
+        elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _shoppingListRef
@@ -170,249 +179,266 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('データの読み込みエラー: ${snapshot.error}'));
+            return Center(child: Text('エラー: ${snapshot.error}'));
           }
-
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final loadedItems = snapshot.data!.docs.map((doc) {
-            return ShoppingItem.fromFirestore(
-              doc.data() as Map<String, dynamic>,
-              doc.id,
-            );
-          }).toList();
+          final items = snapshot.data!.docs
+              .map(
+                (doc) => ShoppingItem.fromFirestore(
+                  doc.data() as Map<String, dynamic>,
+                  doc.id,
+                ),
+              )
+              .toList();
 
-          final categories = <String>{'すべて'};
-          final locations = <String>{'すべて'};
-          for (final it in loadedItems) {
-            if (it.category != null && it.category!.isNotEmpty) {
-              categories.add(it.category!);
-            }
-            if (it.location != null && it.location!.isNotEmpty) {
-              locations.add(it.location!);
-            }
-          }
-          final categoryOptions = categories.toList()..sort();
-          final locationOptions = locations.toList()..sort();
-
-          var displayItems = _applyFiltersAndSort(loadedItems);
-
-          if (_sortKey == SortKey.created && !_isDescending) {
-            displayItems = displayItems.reversed.toList();
-          }
-
-          if (displayItems.isEmpty) {
-            return Column(
-              children: [
-                _buildFilterBar(categoryOptions, locationOptions),
-                const Expanded(child: Center(child: Text('該当するアイテムはありません。'))),
-              ],
-            );
-          }
+          final categories = {
+            'すべて',
+            ...items.map((e) => e.category ?? '').where((e) => e.isNotEmpty),
+          };
+          final locations = {
+            'すべて',
+            ...items.map((e) => e.location ?? '').where((e) => e.isNotEmpty),
+          };
+          final displayItems = _getFilteredItems(items);
 
           return Column(
             children: [
-              _buildFilterBar(categoryOptions, locationOptions),
+              _buildFilterBar(
+                categories.toList()..sort(),
+                locations.toList()..sort(),
+              ),
               Expanded(
-                child: ListView.builder(
-                  itemCount: displayItems.length,
-                  padding: const EdgeInsets.all(8),
-                  itemBuilder: (context, index) {
-                    final item = displayItems[index];
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 0,
-                      ),
-                      child: Padding(
+                child: displayItems.isEmpty
+                    ? const Center(child: Text('アイテムがありません'))
+                    : ListView.builder(
                         padding: const EdgeInsets.all(12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Checkbox(
-                              value: item.isCompleted,
-                              onChanged: (bool? newValue) {
-                                _toggleCompletion(
-                                  item.id,
-                                  item.isCompleted,
-                                  item,
-                                );
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      decoration: item.isCompleted
-                                          ? TextDecoration.lineThrough
-                                          : TextDecoration.none,
-                                      color: item.isCompleted
-                                          ? Colors.grey
-                                          : Colors.black,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      if (item.category != null)
-                                        Chip(
-                                          label: Text(item.category!),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                        ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '個数: ${item.quantity}',
-                                        style: const TextStyle(fontSize: 14),
-                                      ),
-                                    ],
-                                  ),
-                                  if (item.dueDate != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 8),
-                                      child: Text(
-                                        '期限: ${item.dueDate!.year}年${item.dueDate!.month}月${item.dueDate!.day}日',
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.red,
-                                        ),
-                                      ),
-                                    ),
-                                  if (item.location != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        '購入場所: ${item.location}',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                        itemCount: displayItems.length,
+                        itemBuilder: (context, index) =>
+                            _buildItemCard(displayItems[index]),
                       ),
-                    );
-                  },
-                ),
               ),
             ],
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _addItem(context),
-        child: const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addItem,
+        label: const Text('追加'),
+        icon: const Icon(Icons.add),
       ),
     );
   }
 
-  // アプリ上部のフィルター等
-  Widget _buildFilterBar(
-    List<String> categoryOptions,
-    List<String> locationOptions,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      // 全体を一つの Row にまとめます
+  Widget _buildFilterBar(List<String> categories, List<String> locations) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2))),
+      ),
       child: Row(
         children: [
-          // 1. カテゴリフィルタ
           Expanded(
-            flex: 2, // 幅の比率を調整
-            child: DropdownButtonFormField<String>(
-              value: _categoryFilter,
-              isExpanded: true, // テキストが溢れないように
-              items: categoryOptions
-                  .map(
-                    (c) => DropdownMenuItem(
-                      value: c,
-                      child: Text(c, style: const TextStyle(fontSize: 12)),
-                    ),
-                  )
-                  .toList(),
-              decoration: const InputDecoration(
-                labelText: 'ジャンル',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
-              ),
-              onChanged: (v) => setState(() => _categoryFilter = v ?? 'すべて'),
+            flex: 5,
+            child: _buildSmallDropdown(
+              'カテゴリ',
+              _categoryFilter,
+              categories,
+              (v) => setState(() => _categoryFilter = v!),
             ),
           ),
           const SizedBox(width: 8),
-
-          // 2. ロケーションフィルタ
           Expanded(
-            flex: 2,
-            child: DropdownButtonFormField<String>(
-              value: _locationFilter,
-              isExpanded: true,
-              items: locationOptions
-                  .map(
-                    (l) => DropdownMenuItem(
-                      value: l,
-                      child: Text(l, style: const TextStyle(fontSize: 12)),
-                    ),
-                  )
-                  .toList(),
-              decoration: const InputDecoration(
-                labelText: '場所',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
-              ),
-              onChanged: (v) => setState(() => _locationFilter = v ?? 'すべて'),
+            flex: 5,
+            child: _buildSmallDropdown(
+              '場所',
+              _locationFilter,
+              locations,
+              (v) => setState(() => _locationFilter = v!),
             ),
           ),
-          const SizedBox(width: 8),
-
-          // 3. ソート切替（ボタン化して省スペースに）
+          const SizedBox(width: 4),
           IconButton(
-            constraints: const BoxConstraints(), // 余白を詰める
-            padding: EdgeInsets.zero,
-            tooltip: _isDescending ? '降順' : '昇順',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(8),
             icon: Icon(
-              _isDescending ? Icons.sort_rounded : Icons.filter_list_rounded,
-              color: Colors.blue,
+              _isDescending ? Icons.arrow_downward : Icons.arrow_upward,
+              size: 20,
             ),
             onPressed: () => setState(() => _isDescending = !_isDescending),
           ),
-
-          // 4. クリアボタン
           IconButton(
             constraints: const BoxConstraints(),
-            padding: EdgeInsets.zero,
-            tooltip: 'クリア',
-            icon: const Icon(Icons.refresh_rounded, color: Colors.grey),
-            onPressed: () {
-              setState(() {
-                _categoryFilter = 'すべて';
-                _locationFilter = 'すべて';
-                _sortKey = SortKey.created;
-                _isDescending = true;
-              });
-            },
+            padding: const EdgeInsets.all(8),
+            icon: const Icon(Icons.restart_alt, size: 20),
+            onPressed: () => setState(() {
+              _categoryFilter = 'すべて';
+              _locationFilter = 'すべて';
+              _isDescending = true;
+            }),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSmallDropdown(
+    String label,
+    String value,
+    List<String> options,
+    ValueChanged<String?> onChanged,
+  ) {
+    return SizedBox(
+      height: 40, // 高さを抑えてコンパクトに
+      child: DropdownButtonFormField<String>(
+        value: value,
+        items: options
+            .map(
+              (e) => DropdownMenuItem(
+                value: e,
+                child: Text(e, style: const TextStyle(fontSize: 13)),
+              ),
+            )
+            .toList(),
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 12),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 0,
+          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          filled: true,
+          fillColor: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        ),
+      ),
+    );
+  }
+
+  // カード表示
+  Widget _buildItemCard(ShoppingItem item) {
+    return Card(
+      elevation: 1,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            // 左側：チェックボックス
+            Checkbox(
+              value: item.isCompleted,
+              onChanged: (_) => _toggleCompletion(item.id, item),
+            ),
+            const SizedBox(width: 8),
+
+            // 中央：アイテム詳細情報
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      decoration: item.isCompleted
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: item.isCompleted ? Colors.grey : null,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+
+                  // カテゴリと個数
+                  Row(
+                    children: [
+                      if (item.category != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).primaryColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            item.category!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).primaryColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        '個数: ${item.quantity}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+
+                  // 場所と期限
+                  Row(
+                    children: [
+                      if (item.location != null &&
+                          item.location!.isNotEmpty) ...[
+                        const Icon(Icons.place, size: 14, color: Colors.grey),
+                        Text(
+                          ' ${item.location} ',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (item.dueDate != null) ...[
+                        Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: item.isCompleted
+                              ? Colors.grey
+                              : Colors.redAccent,
+                        ),
+                        Text(
+                          ' ${item.dueDate!.year}/${item.dueDate!.month}/${item.dueDate!.day}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: item.isCompleted
+                                ? Colors.grey
+                                : Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              onPressed: () => _deleteItem(item.id),
+            ),
+          ],
+        ),
       ),
     );
   }
