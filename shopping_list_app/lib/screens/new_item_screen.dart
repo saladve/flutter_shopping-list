@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/shopping_item.dart';
 
 //ジャンル
@@ -13,15 +14,68 @@ class NewItemScreen extends StatefulWidget {
 
 class _NewItemScreenState extends State<NewItemScreen> {
   final _formKey = GlobalKey<FormState>();
-
   final _nameController = TextEditingController();
+  final _locationController = TextEditingController();
 
   int _enteredQuantity = 1;
   String? _selectedLocation;
   String _selectedCategory = availableCategories[0];
   DateTime? _selectedDueDate;
+  List<String> _availableLocations = [];
+  bool _isLoadingLocations = false;
 
   var _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvailableLocations();
+  }
+
+  Future<void> _loadAvailableLocations() async {
+    setState(() {
+      _isLoadingLocations = true;
+    });
+
+    try {
+      final locations = <String>{};
+
+      // 買い物リストから場所を取得
+      final shoppingListSnapshot = await FirebaseFirestore.instance
+          .collection('shopping_list')
+          .get();
+
+      for (final doc in shoppingListSnapshot.docs) {
+        final data = doc.data();
+        final location = data['location'] as String?;
+        if (location != null && location.isNotEmpty) {
+          locations.add(location);
+        }
+      }
+
+      // 購買記録からも場所を取得
+      final purchaseRecordsSnapshot = await FirebaseFirestore.instance
+          .collection('purchase_records')
+          .get();
+
+      for (final doc in purchaseRecordsSnapshot.docs) {
+        final data = doc.data();
+        final location = data['location'] as String?;
+        if (location != null && location.isNotEmpty) {
+          locations.add(location);
+        }
+      }
+
+      setState(() {
+        _availableLocations = locations.toList()..sort();
+        _isLoadingLocations = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingLocations = false;
+      });
+    }
+  }
 
   void _saveItem() async {
     if (_formKey.currentState!.validate()) {
@@ -35,7 +89,9 @@ class _NewItemScreenState extends State<NewItemScreen> {
         id: '',
         name: _nameController.text,
         quantity: _enteredQuantity,
-        location: _selectedLocation,
+        location: _selectedLocation?.isNotEmpty == true
+            ? _selectedLocation
+            : null,
         category: _selectedCategory,
         dueDate: _selectedDueDate,
       );
@@ -70,6 +126,7 @@ class _NewItemScreenState extends State<NewItemScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
@@ -172,19 +229,143 @@ class _NewItemScreenState extends State<NewItemScreen> {
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: TextFormField(
-                                decoration: InputDecoration(
-                                  labelText: '購入場所 (任意)',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    '購入場所 (任意)',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
                                   ),
-                                ),
-                                maxLength: 30,
-                                onSaved: (value) {
-                                  _selectedLocation = value!.trim().isEmpty
-                                      ? null
-                                      : value;
-                                },
+                                  const SizedBox(height: 4),
+
+                                  // Autocomplete を使うことで「入力」と「リスト選択」を統合
+                                  Autocomplete<String>(
+                                    optionsBuilder:
+                                        (TextEditingValue textEditingValue) {
+                                          // 入力がないときは候補を表示しない、または全リストを表示する
+                                          if (textEditingValue.text == '') {
+                                            return _availableLocations;
+                                          }
+                                          // 入力文字に一致する候補をフィルタリング
+                                          return _availableLocations.where((
+                                            String option,
+                                          ) {
+                                            return option.contains(
+                                              textEditingValue.text,
+                                            );
+                                          });
+                                        },
+                                    // 選択された時の処理
+                                    onSelected: (String selection) {
+                                      setState(() {
+                                        _selectedLocation = selection;
+                                        _locationController.text = selection;
+                                      });
+                                    },
+                                    // 入力フィールド自体の見た目
+                                    fieldViewBuilder:
+                                        (
+                                          context,
+                                          controller,
+                                          focusNode,
+                                          onFieldSubmitted,
+                                        ) {
+                                          // 既存の _locationController と同期させるための処理
+                                          return TextFormField(
+                                            controller: controller,
+                                            focusNode: focusNode,
+                                            decoration: InputDecoration(
+                                              hintText: '選択または新規入力',
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
+                                              contentPadding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                              // 入力中にクリアできるアイコンを置くと便利
+                                              suffixIcon:
+                                                  controller.text.isNotEmpty
+                                                  ? IconButton(
+                                                      icon: const Icon(
+                                                        Icons.clear,
+                                                        size: 18,
+                                                      ),
+                                                      onPressed: () {
+                                                        controller.clear();
+                                                        setState(
+                                                          () =>
+                                                              _selectedLocation =
+                                                                  null,
+                                                        );
+                                                      },
+                                                    )
+                                                  : null,
+                                            ),
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _selectedLocation =
+                                                    value.trim().isEmpty
+                                                    ? null
+                                                    : value.trim();
+                                                _locationController.text =
+                                                    value; // 外部保存用コントローラと同期
+                                              });
+                                            },
+                                          );
+                                        },
+                                    // 候補リストの見た目（Notion風に少しカスタマイズ）
+                                    optionsViewBuilder:
+                                        (context, onSelected, options) {
+                                          return Align(
+                                            alignment: Alignment.topLeft,
+                                            child: Material(
+                                              elevation: 4.0,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              child: Container(
+                                                width:
+                                                    MediaQuery.of(
+                                                      context,
+                                                    ).size.width *
+                                                    0.4, // 幅を調整
+                                                constraints:
+                                                    const BoxConstraints(
+                                                      maxHeight: 200,
+                                                    ),
+                                                child: ListView.builder(
+                                                  padding: EdgeInsets.zero,
+                                                  shrinkWrap: true,
+                                                  itemCount: options.length,
+                                                  itemBuilder:
+                                                      (
+                                                        BuildContext context,
+                                                        int index,
+                                                      ) {
+                                                        final String option =
+                                                            options.elementAt(
+                                                              index,
+                                                            );
+                                                        return ListTile(
+                                                          title: Text(option),
+                                                          onTap: () =>
+                                                              onSelected(
+                                                                option,
+                                                              ),
+                                                        );
+                                                      },
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                  ),
+                                ],
                               ),
                             ),
                           ],
