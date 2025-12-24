@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:async';
 import '../models/shopping_item.dart';
 import '../models/purchase_record.dart';
 import '../screens/new_item_screen.dart';
@@ -24,7 +23,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   String _locationFilter = 'すべて';
   SortKey _sortKey = SortKey.created;
   bool _isDescending = true;
-  String _locationSearch = '';
 
   void _toggleCompletion(
     String itemId,
@@ -52,10 +50,13 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       );
 
       if (shouldAddToPurchaseHistory == true) {
-        // 購買記録追加画面を開く（初期値として商品名を設定）
+        // 購買記録追加画面を開く（初期値として商品名とカテゴリを設定）
         final newRecord = await Navigator.of(context).push<PurchaseRecord>(
           MaterialPageRoute(
-            builder: (ctx) => NewPurchaseRecordScreen(initialName: item.name),
+            builder: (ctx) => NewPurchaseRecordScreen(
+              initialName: item.name,
+              initialCategory: item.category,
+            ),
           ),
         );
 
@@ -65,10 +66,16 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 .collection('purchase_records')
                 .add(newRecord.toFirestore());
 
+            // 購買記録に追加されたアイテムをリストから削除
+            await _shoppingListRef.doc(itemId).delete();
+
             if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${newRecord.name} を購買記録に追加しました。')),
+              SnackBar(
+                content: Text('${newRecord.name} を購買記録に追加し、リストから削除しました。'),
+              ),
             );
+            return; // 削除したのでチェック状態の更新は不要
           } catch (e) {
             if (!context.mounted) return;
             ScaffoldMessenger.of(
@@ -79,6 +86,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       }
     }
 
+    // 購買記録に追加されなかった場合のみチェック状態を更新
     await _shoppingListRef.doc(itemId).update({
       'isCompleted': !isCurrentlyCompleted,
     });
@@ -94,35 +102,13 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
 
     try {
-      print('📝 Firestore に書き込み開始: ${newItem.name}');
-      print('🔗 Firestore インスタンス: $_shoppingListRef');
-
-      // Firestore に接続確認
-      final testDoc = await FirebaseFirestore.instance
-          .collection('_test')
-          .doc('connection_test')
-          .get()
-          .timeout(const Duration(seconds: 5));
-      print('✅ Firestore 接続確認成功');
-
-      // 実際のデータ追加
-      await _shoppingListRef
-          .add(newItem.toFirestore())
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              throw TimeoutException('Firestore の書き込みがタイムアウトしました');
-            },
-          );
-      print('✅ Firestore に書き込み成功: ${newItem.name}');
+      await _shoppingListRef.add(newItem.toFirestore());
 
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('${newItem.name} をリストに追加しました。')));
     } catch (e) {
-      print('❌ Firestore 書き込みエラー: $e');
-      print('❌ エラー詳細: ${e.toString()}');
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -139,10 +125,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       }
       if (_locationFilter != 'すべて' &&
           (item.location ?? '') != _locationFilter) {
-        return false;
-      }
-      if (_locationSearch.isNotEmpty &&
-          !(item.location ?? '').contains(_locationSearch)) {
         return false;
       }
       return true;
@@ -170,8 +152,17 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('買い物メモアプリ'),
-        backgroundColor: Theme.of(context).primaryColor,
+        title: const Text(
+          '買い物メモアプリ',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surface
+            : Theme.of(context).primaryColor,
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.onSurface
+            : Theme.of(context).colorScheme.onPrimary,
+        elevation: 2,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _shoppingListRef
@@ -196,10 +187,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           final categories = <String>{'すべて'};
           final locations = <String>{'すべて'};
           for (final it in loadedItems) {
-            if (it.category != null && it.category!.isNotEmpty)
+            if (it.category != null && it.category!.isNotEmpty) {
               categories.add(it.category!);
-            if (it.location != null && it.location!.isNotEmpty)
+            }
+            if (it.location != null && it.location!.isNotEmpty) {
               locations.add(it.location!);
+            }
           }
           final categoryOptions = categories.toList()..sort();
           final locationOptions = locations.toList()..sort();
@@ -335,101 +328,89 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
+      // 全体を一つの Row にまとめます
+      child: Row(
         children: [
-          Row(
-            children: [
-              // カテゴリフィルタ
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _categoryFilter,
-                  items: categoryOptions
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  decoration: const InputDecoration(labelText: 'ジャンルで絞る'),
-                  onChanged: (v) {
-                    setState(() {
-                      _categoryFilter = v ?? 'すべて';
-                    });
-                  },
+          // 1. カテゴリフィルタ
+          Expanded(
+            flex: 2, // 幅の比率を調整
+            child: DropdownButtonFormField<String>(
+              value: _categoryFilter,
+              isExpanded: true, // テキストが溢れないように
+              items: categoryOptions
+                  .map(
+                    (c) => DropdownMenuItem(
+                      value: c,
+                      child: Text(c, style: const TextStyle(fontSize: 12)),
+                    ),
+                  )
+                  .toList(),
+              decoration: const InputDecoration(
+                labelText: 'ジャンル',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
                 ),
               ),
-              const SizedBox(width: 8),
-              // ロケーションフィルタ
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _locationFilter,
-                  items: locationOptions
-                      .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                      .toList(),
-                  decoration: const InputDecoration(labelText: '購入場所で絞る'),
-                  onChanged: (v) {
-                    setState(() {
-                      _locationFilter = v ?? 'すべて';
-                    });
-                  },
-                ),
-              ),
-            ],
+              onChanged: (v) => setState(() => _categoryFilter = v ?? 'すべて'),
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: const InputDecoration(
-                    labelText: '購入場所で検索',
-                    prefixIcon: Icon(Icons.search),
-                  ),
-                  controller: TextEditingController(text: _locationSearch),
-                  onChanged: (v) {
-                    setState(() {
-                      _locationSearch = v.trim();
-                    });
-                  },
+          const SizedBox(width: 8),
+
+          // 2. ロケーションフィルタ
+          Expanded(
+            flex: 2,
+            child: DropdownButtonFormField<String>(
+              value: _locationFilter,
+              isExpanded: true,
+              items: locationOptions
+                  .map(
+                    (l) => DropdownMenuItem(
+                      value: l,
+                      child: Text(l, style: const TextStyle(fontSize: 12)),
+                    ),
+                  )
+                  .toList(),
+              decoration: const InputDecoration(
+                labelText: '場所',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
                 ),
               ),
-              const SizedBox(width: 8),
-              DropdownButton<SortKey>(
-                value: _sortKey,
-                items: const [
-                  DropdownMenuItem(value: SortKey.created, child: Text('追加順')),
-                  DropdownMenuItem(value: SortKey.due, child: Text('期日順')),
-                ],
-                onChanged: (v) {
-                  setState(() {
-                    _sortKey = v ?? SortKey.created;
-                  });
-                },
-              ),
-              const SizedBox(width: 8),
-              // 順序反転ボタン
-              IconButton(
-                tooltip: _isDescending ? '降順に表示' : '昇順に表示',
-                icon: Icon(
-                  _isDescending ? Icons.arrow_downward : Icons.arrow_upward,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _isDescending = !_isDescending;
-                  });
-                },
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                tooltip: 'フィルタをクリア',
-                icon: const Icon(Icons.clear_all),
-                onPressed: () {
-                  setState(() {
-                    _categoryFilter = 'すべて';
-                    _locationFilter = 'すべて';
-                    _locationSearch = '';
-                    _sortKey = SortKey.created;
-                    _isDescending = true;
-                  });
-                },
-              ),
-            ],
+              onChanged: (v) => setState(() => _locationFilter = v ?? 'すべて'),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // 3. ソート切替（ボタン化して省スペースに）
+          IconButton(
+            constraints: const BoxConstraints(), // 余白を詰める
+            padding: EdgeInsets.zero,
+            tooltip: _isDescending ? '降順' : '昇順',
+            icon: Icon(
+              _isDescending ? Icons.sort_rounded : Icons.filter_list_rounded,
+              color: Colors.blue,
+            ),
+            onPressed: () => setState(() => _isDescending = !_isDescending),
+          ),
+
+          // 4. クリアボタン
+          IconButton(
+            constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+            tooltip: 'クリア',
+            icon: const Icon(Icons.refresh_rounded, color: Colors.grey),
+            onPressed: () {
+              setState(() {
+                _categoryFilter = 'すべて';
+                _locationFilter = 'すべて';
+                _sortKey = SortKey.created;
+                _isDescending = true;
+              });
+            },
           ),
         ],
       ),

@@ -8,6 +8,7 @@ class PurchaseRecord {
   final DateTime purchaseDate;
   final int quantity;
   final String? notes;
+  final String? category;
 
   const PurchaseRecord({
     required this.id,
@@ -17,6 +18,7 @@ class PurchaseRecord {
     required this.purchaseDate,
     this.quantity = 1,
     this.notes,
+    this.category,
   });
 
   PurchaseRecord copyWith({
@@ -27,6 +29,7 @@ class PurchaseRecord {
     DateTime? purchaseDate,
     int? quantity,
     String? notes,
+    String? category,
   }) {
     return PurchaseRecord(
       id: id ?? this.id,
@@ -36,6 +39,7 @@ class PurchaseRecord {
       purchaseDate: purchaseDate ?? this.purchaseDate,
       quantity: quantity ?? this.quantity,
       notes: notes ?? this.notes,
+      category: category ?? this.category,
     );
   }
 
@@ -50,6 +54,7 @@ class PurchaseRecord {
           : DateTime.now(),
       quantity: data['quantity'] ?? 1,
       notes: data['notes'],
+      category: data['category'],
     );
   }
 
@@ -61,6 +66,7 @@ class PurchaseRecord {
       'purchaseDate': Timestamp.fromDate(purchaseDate),
       'quantity': quantity,
       'notes': notes,
+      'category': category,
       'createdAt': Timestamp.now(),
     };
   }

@@ -71,8 +71,17 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('購買記録'),
-        backgroundColor: Theme.of(context).primaryColor,
+        title: const Text(
+          '購買記録',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surface
+            : Theme.of(context).primaryColor,
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.onSurface
+            : Theme.of(context).colorScheme.onPrimary,
+        elevation: 2,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _purchaseRecordsRef
